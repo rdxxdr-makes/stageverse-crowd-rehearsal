@@ -348,7 +348,7 @@ export function Audience({ config, running, audio, showRoles }: Props) {
       dy = Math.atan2(Math.sin(dy), Math.cos(dy));
       m.yaw += dy * (1 - Math.exp(-6 * (dt || 0.016)));
 
-      root.position.set(m.pos.x, m.pos.y + lift * 1 + bob - (standing || m.action === "walk" ? 0 : 0.3), m.pos.z);
+      root.position.set(m.pos.x, m.pos.y + lift * 1 + bob, m.pos.z);
       root.rotation.set(0, m.yaw, 0);
       torso.rotation.set(lean, 0, 0);
       head.rotation.set(hx, hy, hz);
