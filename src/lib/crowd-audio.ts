@@ -35,7 +35,7 @@ export class CrowdAudio {
     [
       [320, 0.23],
       [650, 0.37],
-    ].forEach(([f, lf]) => {
+    ].forEach(([f = 400, lf = 0.3]) => {
       const src = ctx.createBufferSource();
       src.buffer = this.noise;
       src.loop = true;

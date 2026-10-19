@@ -84,12 +84,12 @@ export function Audience({ config, running, audio, showRoles }: Props) {
     ];
     for (let i = kinds.length - 1; i > 0; i--) {
       const j = Math.floor(Math.random() * (i + 1));
-      [kinds[i], kinds[j]] = [kinds[j], kinds[i]];
+      [kinds[i], kinds[j]] = [kinds[j]!, kinds[i]!];
     }
     return kinds.map((kind, i) => ({
       kind,
-      seat: seats[i].clone(),
-      pos: seats[i].clone(),
+      seat: seats[i]!.clone(),
+      pos: seats[i]!.clone(),
       yaw: Math.PI,
       action: "watch" as Action,
       t: 0,
@@ -147,8 +147,8 @@ export function Audience({ config, running, audio, showRoles }: Props) {
   useLayoutEffect(() => {
     const c = new THREE.Color();
     members.forEach((m, i) => {
-      refs.torso.current!.setColorAt(i, c.set(SHIRTS[(i * 7) % SHIRTS.length]));
-      const skin = c.set(SKINS[(i * 5) % SKINS.length]);
+      refs.torso.current!.setColorAt(i, c.set(SHIRTS[(i * 7) % SHIRTS.length]!));
+      const skin = c.set(SKINS[(i * 5) % SKINS.length]!);
       refs.head.current!.setColorAt(i, skin);
       refs.armL.current!.setColorAt(i, skin);
       refs.armR.current!.setColorAt(i, skin);
@@ -215,7 +215,7 @@ export function Audience({ config, running, audio, showRoles }: Props) {
             new THREE.Vector3(aisleX, m.seat.y, m.seat.z - 0.45),
             m.seat.clone(),
           ];
-          m.path[0].x = m.seat.x;
+          m.path[0]!.x = m.seat.x;
           m.path.splice(1, 0, new THREE.Vector3(aisleX, m.seat.y, m.seat.z - 0.45));
         }
         if (next === "talk") m.talkDir = Math.random() < 0.5 ? -1 : 1;
@@ -233,7 +233,7 @@ export function Audience({ config, running, audio, showRoles }: Props) {
             {
               id: idRef.current++,
               kind: m.kind,
-              text: list[Math.floor(Math.random() * list.length)],
+              text: list[Math.floor(Math.random() * list.length)]!,
               pos: [m.pos.x, m.pos.y + 2.1, m.pos.z],
               until: now + 2.8,
             },

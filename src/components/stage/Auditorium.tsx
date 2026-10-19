@@ -29,16 +29,16 @@ function useWoodTexture() {
   }, []);
 }
 
-function Spot({ target, ...props }: { target: [number, number, number] } & ThreeElements["spotLight"]) {
+function Spot({ aim, ...props }: { aim: [number, number, number] } & Omit<ThreeElements["spotLight"], "target">) {
   const ref = useRef<THREE.SpotLight>(null);
   useEffect(() => {
     const l = ref.current!;
-    l.target.position.set(...target);
+    l.target.position.set(aim[0], aim[1], aim[2]);
     l.parent?.add(l.target);
     return () => {
       l.parent?.remove(l.target);
     };
-  }, [target]);
+  }, [aim[0], aim[1], aim[2]]);
   return <spotLight ref={ref} {...props} />;
 }
 
@@ -129,9 +129,9 @@ export function Auditorium({ config, running, audio, showRoles, seed }: Props) {
       <hemisphereLight args={["#ffd9b0", "#2a1010", 0.55]} />
       <ambientLight intensity={0.25} />
       {/* stage wash spilling onto the front rows */}
-      <Spot position={[0, 7, -5]} target={[0, 1, 6]} angle={0.6} penumbra={0.8} intensity={60} color="#fff1d6" distance={30} decay={1.5} />
-      <Spot position={[-5, 8, 0]} target={[0, 1, -2]} angle={0.4} penumbra={1} intensity={40} color="#ffb070" distance={25} decay={1.5} />
-      <Spot position={[5, 8, 0]} target={[0, 1, -2]} angle={0.4} penumbra={1} intensity={40} color="#9fc3ff" distance={25} decay={1.5} />
+      <Spot position={[0, 7, -5]} aim={[0, 1, 6]} angle={0.6} penumbra={0.8} intensity={60} color="#fff1d6" distance={30} decay={1.5} />
+      <Spot position={[-5, 8, 0]} aim={[0, 1, -2]} angle={0.4} penumbra={1} intensity={40} color="#ffb070" distance={25} decay={1.5} />
+      <Spot position={[5, 8, 0]} aim={[0, 1, -2]} angle={0.4} penumbra={1} intensity={40} color="#9fc3ff" distance={25} decay={1.5} />
       {houseLights.map((i) => (
         <pointLight key={i} position={[0, 6, 4 + i * 2.4]} intensity={6} distance={9} color="#ffc78a" decay={1.6} />
       ))}
