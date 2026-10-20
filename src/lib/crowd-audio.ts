@@ -1,5 +1,5 @@
 // Procedural crowd audio via Web Audio — no audio files needed.
-export type CrowdSound = "clap" | "cheer" | "boo" | "laugh";
+export type CrowdSound = "clap" | "cheer" | "boo" | "laugh" | "thud";
 
 export class CrowdAudio {
   private ctx: AudioContext | null = null;
@@ -104,11 +104,24 @@ export class CrowdAudio {
     const ctx = this.ctx;
     if (!ctx || ctx.state !== "running") return;
     const now = ctx.currentTime;
-    const minGap = kind === "clap" ? 0.15 : 0.5;
+    const minGap = kind === "clap" ? 0.15 : kind === "thud" ? 0.2 : 0.5;
     if (now - (this.last[kind] ?? 0) < minGap) return;
     this.last[kind] = now;
 
-    if (kind === "clap") {
+    if (kind === "thud") {
+      // soft stone impact: low noise thump + pitch-dropping thump tone
+      this.burst(160, 1, now, 0.16, 0.4);
+      const osc = ctx.createOscillator();
+      osc.type = "sine";
+      osc.frequency.setValueAtTime(110, now);
+      osc.frequency.exponentialRampToValueAtTime(45, now + 0.18);
+      const g = ctx.createGain();
+      g.gain.setValueAtTime(0.3, now);
+      g.gain.exponentialRampToValueAtTime(0.001, now + 0.2);
+      osc.connect(g).connect(this.master);
+      osc.start(now);
+      osc.stop(now + 0.22);
+    } else if (kind === "clap") {
       for (let i = 0; i < 10; i++) this.burst(1200 + Math.random() * 1400, 1.5, now + i * 0.14 + Math.random() * 0.05, 0.06, 0.25 + Math.random() * 0.2);
     } else if (kind === "laugh") {
       const n = 4 + Math.floor(Math.random() * 3);
