@@ -5,7 +5,7 @@ import * as THREE from "three";
 import { PHRASES, type AudienceConfig, type Kind } from "@/lib/audience";
 import type { CrowdAudio, CrowdSound } from "@/lib/crowd-audio";
 
-type Action = "watch" | "clap" | "cheer" | "talk" | "laugh" | "skeptic" | "boo" | "walk";
+type Action = "watch" | "clap" | "cheer" | "jump" | "talk" | "laugh" | "skeptic" | "boo" | "mock" | "throw" | "walk";
 
 interface Member {
   kind: Kind;
@@ -19,6 +19,10 @@ interface Member {
   talkDir: number;
   path: THREE.Vector3[];
   bubbleCd: number;
+  scaleW: number;
+  scaleH: number;
+  hair: 0 | 1 | 2; // cap, bun, none
+  threw: boolean;
 }
 
 interface Bubble {
@@ -29,12 +33,29 @@ interface Bubble {
   until: number;
 }
 
-export const COLS = 16;
+interface Stone {
+  active: boolean;
+  pos: THREE.Vector3;
+  vel: THREE.Vector3;
+  floor: number;
+  spin: number;
+}
+
+interface Ring {
+  active: boolean;
+  pos: THREE.Vector3;
+  t: number;
+}
+
+export const COLS = 20;
 const SPACING = 0.95;
 const ROW_DEPTH = 1.15;
 const RISE = 0.38;
 const FRONT_Z = 3;
 const AISLE = 1.6;
+const MAX_STONES = 14;
+const MAX_RINGS = 10;
+const GRAVITY = 9.8;
 
 export function seatPosition(row: number, col: number) {
   const half = COLS / 2;
@@ -44,22 +65,35 @@ export function seatPosition(row: number, col: number) {
   return new THREE.Vector3(x, row * RISE, FRONT_Z + row * ROW_DEPTH);
 }
 
-const WEIGHTS: Record<Kind, [Action, number][]> = {
-  lover: [["clap", 0.3], ["cheer", 0.25], ["watch", 0.25], ["talk", 0.1], ["laugh", 0.1]],
-  hater: [["skeptic", 0.35], ["boo", 0.15], ["watch", 0.25], ["talk", 0.2], ["laugh", 0.05]],
-  neutral: [["watch", 0.45], ["talk", 0.25], ["clap", 0.1], ["laugh", 0.08], ["walk", 0.12]],
-};
+const LOVER_WEIGHTS: [Action, number][] = [["clap", 0.25], ["cheer", 0.2], ["jump", 0.15], ["watch", 0.2], ["talk", 0.1], ["laugh", 0.1]];
+const NEUTRAL_WEIGHTS: [Action, number][] = [["watch", 0.45], ["talk", 0.25], ["clap", 0.1], ["laugh", 0.08], ["walk", 0.12]];
 
-function pick(kind: Kind): Action {
+function haterWeights(intensity: number): [Action, number][] {
+  switch (intensity) {
+    case 0:
+      return [["watch", 0.5], ["talk", 0.3], ["skeptic", 0.2]];
+    case 1:
+      return [["skeptic", 0.3], ["watch", 0.3], ["talk", 0.25], ["boo", 0.08], ["mock", 0.07]];
+    case 2:
+      return [["skeptic", 0.28], ["boo", 0.2], ["mock", 0.18], ["watch", 0.18], ["talk", 0.16]];
+    default:
+      return [["boo", 0.3], ["mock", 0.28], ["skeptic", 0.22], ["watch", 0.1], ["talk", 0.1]];
+  }
+}
+
+function pick(kind: Kind, hw: [Action, number][]): Action {
+  const table = kind === "lover" ? LOVER_WEIGHTS : kind === "hater" ? hw : NEUTRAL_WEIGHTS;
   let r = Math.random();
-  for (const [a, w] of WEIGHTS[kind]) if ((r -= w) <= 0) return a;
+  for (const [a, w] of table) if ((r -= w) <= 0) return a;
   return "watch";
 }
 
-const SHIRTS = ["#3d5a80", "#6b4f3a", "#8a8d91", "#2f4f4f", "#7a3b4a", "#c9a66b", "#4a4e69", "#556b2f", "#9c6644", "#e0e1dd"];
-const SKINS = ["#f1c27d", "#e0ac69", "#c68642", "#8d5524", "#ffdbac", "#a1665e"];
+const SHIRTS = ["#3d5a80", "#6b4f3a", "#8a8d91", "#2f4f4f", "#7a3b4a", "#c9a66b", "#4a4e69", "#556b2f", "#9c6644", "#e0e1dd", "#5e503f", "#22333b", "#7f5539", "#3a5a40", "#9b2226", "#4361ee"];
+const SKINS = ["#f1c27d", "#e0ac69", "#c68642", "#8d5524", "#ffdbac", "#a1665e", "#6b4a2f", "#f7d7c4"];
+const HAIR_COLORS = ["#1a1512", "#3b2a1a", "#6b4a2a", "#a67c3d", "#c9c9c9", "#7a3b22", "#2a2a2a", "#d8b98a"];
 const BADGE: Record<Kind, string> = { lover: "#f5b942", hater: "#e0452f", neutral: "#000000" };
-const SOUND: Partial<Record<Action, CrowdSound>> = { clap: "clap", cheer: "cheer", boo: "boo", laugh: "laugh" };
+const SOUND: Partial<Record<Action, CrowdSound>> = { clap: "clap", cheer: "cheer", jump: "cheer", boo: "boo", laugh: "laugh", mock: "laugh" };
+const BUBBLE_ACTIONS: Action[] = ["cheer", "jump", "boo", "mock", "talk", "skeptic"];
 
 interface Props {
   config: AudienceConfig;
@@ -70,11 +104,12 @@ interface Props {
 
 export function Audience({ config, running, audio, showRoles }: Props) {
   const rows = Math.ceil(config.size / COLS);
+  const hw = useMemo(() => haterWeights(config.intensity), [config.intensity]);
 
   const members = useMemo<Member[]>(() => {
     const seats: THREE.Vector3[] = [];
     for (let r = 0; r < rows; r++) {
-      const cols = [...Array(COLS).keys()].sort((a, b) => Math.abs(a - 7.5) - Math.abs(b - 7.5));
+      const cols = [...Array(COLS).keys()].sort((a, b) => Math.abs(a - (COLS - 1) / 2) - Math.abs(b - (COLS - 1) / 2));
       for (const c of cols) seats.push(seatPosition(r, c));
     }
     const kinds: Kind[] = [
@@ -98,34 +133,45 @@ export function Audience({ config, running, audio, showRoles }: Props) {
       talkDir: Math.random() < 0.5 ? -1 : 1,
       path: [],
       bubbleCd: Math.random() * 5,
+      scaleW: 0.9 + Math.random() * 0.25,
+      scaleH: 0.92 + Math.random() * 0.16,
+      hair: (Math.random() < 0.45 ? 0 : Math.random() < 0.75 ? 1 : 2) as 0 | 1 | 2,
+      threw: false,
     }));
   }, [config, rows]);
 
   const geo = useMemo(() => {
     const torso = new THREE.CylinderGeometry(0.17, 0.22, 0.6, 8);
     const head = new THREE.SphereGeometry(0.15, 12, 10);
+    const hair = new THREE.SphereGeometry(0.155, 10, 8);
     const arm = new THREE.CapsuleGeometry(0.05, 0.42, 3, 6).translate(0, -0.25, 0);
     const leg = new THREE.CapsuleGeometry(0.075, 0.42, 3, 6).translate(0, -0.25, 0);
     const badge = new THREE.OctahedronGeometry(0.08);
     const seat = new THREE.BoxGeometry(0.8, 1, 0.7);
-    return { torso, head, arm, leg, badge, seat };
+    const stone = new THREE.DodecahedronGeometry(0.09);
+    const ring = new THREE.RingGeometry(0.28, 0.38, 24).rotateX(-Math.PI / 2);
+    return { torso, head, hair, arm, leg, badge, seat, stone, ring };
   }, []);
 
   const refs = {
     torso: useRef<THREE.InstancedMesh>(null),
     head: useRef<THREE.InstancedMesh>(null),
+    hair: useRef<THREE.InstancedMesh>(null),
     armL: useRef<THREE.InstancedMesh>(null),
     armR: useRef<THREE.InstancedMesh>(null),
     legL: useRef<THREE.InstancedMesh>(null),
     legR: useRef<THREE.InstancedMesh>(null),
     badge: useRef<THREE.InstancedMesh>(null),
     seat: useRef<THREE.InstancedMesh>(null),
+    stone: useRef<THREE.InstancedMesh>(null),
+    ring: useRef<THREE.InstancedMesh>(null),
   };
 
   const rig = useMemo(() => {
     const root = new THREE.Object3D();
     const torso = new THREE.Object3D();
     const head = new THREE.Object3D();
+    const hair = new THREE.Object3D();
     const armL = new THREE.Object3D();
     const armR = new THREE.Object3D();
     const legL = new THREE.Object3D();
@@ -133,15 +179,23 @@ export function Audience({ config, running, audio, showRoles }: Props) {
     const badge = new THREE.Object3D();
     root.add(torso, legL, legR);
     torso.add(head, armL, armR, badge);
+    head.add(hair);
     torso.position.set(0, 0.85, 0);
     head.position.set(0, 0.47, 0);
+    hair.position.set(0, 0.05, 0);
     armL.position.set(-0.25, 0.25, 0);
     armR.position.set(0.25, 0.25, 0);
     legL.position.set(-0.1, 0.55, 0);
     legR.position.set(0.1, 0.55, 0);
     badge.position.set(0, 0.85, 0);
-    return { root, torso, head, armL, armR, legL, legR, badge };
+    return { root, torso, head, hair, armL, armR, legL, legR, badge };
   }, []);
+
+  const stones = useMemo<Stone[]>(
+    () => Array.from({ length: MAX_STONES }, () => ({ active: false, pos: new THREE.Vector3(), vel: new THREE.Vector3(), floor: 0, spin: Math.random() * 6 })),
+    [],
+  );
+  const rings = useMemo<Ring[]>(() => Array.from({ length: MAX_RINGS }, () => ({ active: false, pos: new THREE.Vector3(), t: 0 })), []);
 
   // static colors + seats
   useLayoutEffect(() => {
@@ -152,6 +206,7 @@ export function Audience({ config, running, audio, showRoles }: Props) {
       refs.head.current!.setColorAt(i, skin);
       refs.armL.current!.setColorAt(i, skin);
       refs.armR.current!.setColorAt(i, skin);
+      refs.hair.current!.setColorAt(i, c.set(HAIR_COLORS[(i * 11) % HAIR_COLORS.length]!));
       refs.badge.current!.setColorAt(i, c.set(BADGE[m.kind]));
     });
     Object.values(refs).forEach((r) => r.current?.instanceColor && (r.current.instanceColor.needsUpdate = true));
@@ -194,18 +249,50 @@ export function Audience({ config, running, audio, showRoles }: Props) {
       bubblesChanged = true;
     }
 
-    const { root, torso, head, armL, armR, legL, legR, badge } = rig;
+    const { root, torso, head, hair, armL, armR, legL, legR, badge } = rig;
+
+    const spawnRing = (p: THREE.Vector3) => {
+      const r = rings.find((r) => !r.active);
+      if (!r) return;
+      r.active = true;
+      r.t = 0;
+      r.pos.copy(p);
+      r.pos.y += 0.03;
+    };
+
+    const spawnStone = (from: THREE.Vector3) => {
+      const s = stones.find((s) => !s.active);
+      if (!s) return;
+      const onStage = Math.random() < 0.6;
+      const tx = THREE.MathUtils.clamp(from.x * 0.35 + (Math.random() - 0.5) * 3, -5.5, 5.5);
+      const ty = onStage ? 1.05 : 0.05;
+      const tz = onStage ? -3.5 + Math.random() * 3 : 0.6 + Math.random() * 1.4;
+      const T = 0.9 + Math.random() * 0.5;
+      s.active = true;
+      s.pos.set(from.x, from.y + 1.5, from.z);
+      s.vel.set((tx - s.pos.x) / T, (ty - s.pos.y) / T + 0.5 * GRAVITY * T, (tz - s.pos.z) / T);
+      s.floor = ty;
+    };
 
     members.forEach((m, i) => {
       m.t += dt;
       m.bubbleCd -= dt;
       // choose next action
       if (live && m.action !== "walk" && m.t > m.dur) {
-        let next = pick(m.kind);
+        let next = pick(m.kind, hw);
         if (next === "walk" && walkers >= 3) next = "watch";
+        if (
+          m.kind === "hater" &&
+          config.stones &&
+          config.intensity >= 2 &&
+          next !== "walk" &&
+          Math.random() < 0.08 * config.intensity
+        )
+          next = "throw";
         m.action = next;
         m.t = 0;
-        m.dur = next === "watch" ? 2 + Math.random() * 5 : 2 + Math.random() * 3;
+        m.threw = false;
+        m.dur = next === "watch" ? 2 + Math.random() * 5 : next === "throw" ? 1.6 : 2 + Math.random() * 3;
         if (next === "walk") {
           walkers++;
           const aisleX = 0;
@@ -222,7 +309,7 @@ export function Audience({ config, running, audio, showRoles }: Props) {
         const s = SOUND[next];
         if (s && Math.random() < 0.6) audio.play(s);
         if (
-          ["cheer", "boo", "talk", "skeptic"].includes(next) &&
+          BUBBLE_ACTIONS.includes(next) &&
           m.bubbleCd <= 0 &&
           bubbleRef.current.length < 6 &&
           Math.random() < 0.4
@@ -252,7 +339,7 @@ export function Audience({ config, running, audio, showRoles }: Props) {
       let hx = 0, hy = 0, hz = 0;
       let aLx = -0.6, aLz = 0.1, aRx = -0.6, aRz = -0.1;
       let lLx = -1.45, lRx = -1.45;
-      const standing = ["cheer", "walk"].includes(m.action) || (m.action === "boo" && m.t < 1.5);
+      const standing = ["cheer", "jump", "throw", "walk"].includes(m.action) || (m.action === "boo" && m.t < 1.5);
 
       switch (m.action) {
         case "watch":
@@ -274,6 +361,14 @@ export function Audience({ config, running, audio, showRoles }: Props) {
           aRz = 0.25;
           bob = Math.abs(Math.sin(t * 7)) * 0.15;
           hx = -0.25;
+          break;
+        case "jump":
+          aLx = -2.95 + Math.sin(t * 10) * 0.15;
+          aRx = -2.95 + Math.cos(t * 10) * 0.15;
+          aLz = -0.35;
+          aRz = 0.35;
+          bob = Math.abs(Math.sin(t * 6)) * 0.34;
+          hx = -0.2;
           break;
         case "talk":
           targetYaw = Math.PI - m.talkDir * 0.9;
@@ -305,6 +400,31 @@ export function Audience({ config, running, audio, showRoles }: Props) {
           hx = 0.15;
           hy = Math.sin(t * 4) * 0.2;
           break;
+        case "mock":
+          // mocking laugh: lean back, pointing arm, head shaking
+          lean = -0.18;
+          hx = -0.3;
+          hy = Math.sin(t * 7) * 0.3;
+          aRx = -1.4;
+          aRz = -0.2;
+          aLx = -0.7;
+          aLz = 0.5;
+          bob = Math.abs(Math.sin(t * 9)) * 0.05;
+          break;
+        case "throw": {
+          // windup then overhead swing; stone releases mid-swing
+          const k = Math.min(m.t / 0.7, 1);
+          aRx = -2.6 + k * 2.3;
+          aRz = 0.15;
+          aLx = -0.8;
+          lean = 0.12 + k * 0.1;
+          hx = 0.1;
+          if (!m.threw && m.t > 0.55) {
+            m.threw = true;
+            spawnStone(m.pos);
+          }
+          break;
+        }
         case "walk": {
           const target = m.path[0];
           if (target) {
@@ -350,8 +470,18 @@ export function Audience({ config, running, audio, showRoles }: Props) {
 
       root.position.set(m.pos.x, m.pos.y + lift * 1 + bob, m.pos.z);
       root.rotation.set(0, m.yaw, 0);
+      root.scale.set(m.scaleW, m.scaleH, m.scaleW);
       torso.rotation.set(lean, 0, 0);
       head.rotation.set(hx, hy, hz);
+      if (m.hair === 0) {
+        hair.position.set(0, 0.05, 0);
+        hair.scale.set(1.05, 0.7, 1.05);
+      } else if (m.hair === 1) {
+        hair.position.set(0, 0.14, -0.06);
+        hair.scale.setScalar(0.55);
+      } else {
+        hair.scale.setScalar(0);
+      }
       armL.rotation.set(aLx, 0, aLz);
       armR.rotation.set(aRx, 0, aRz);
       legL.rotation.set(lLx, 0, 0);
@@ -361,14 +491,62 @@ export function Audience({ config, running, audio, showRoles }: Props) {
       root.updateMatrixWorld(true);
       refs.torso.current!.setMatrixAt(i, torso.matrixWorld);
       refs.head.current!.setMatrixAt(i, head.matrixWorld);
+      refs.hair.current!.setMatrixAt(i, hair.matrixWorld);
       refs.armL.current!.setMatrixAt(i, armL.matrixWorld);
       refs.armR.current!.setMatrixAt(i, armR.matrixWorld);
       refs.legL.current!.setMatrixAt(i, legL.matrixWorld);
       refs.legR.current!.setMatrixAt(i, legR.matrixWorld);
       refs.badge.current!.setMatrixAt(i, badge.matrixWorld);
     });
-    for (const k of ["torso", "head", "armL", "armR", "legL", "legR", "badge"] as const)
+    for (const k of ["torso", "head", "hair", "armL", "armR", "legL", "legR", "badge"] as const)
       refs[k].current!.instanceMatrix.needsUpdate = true;
+
+    // stones in flight
+    const d = new THREE.Object3D();
+    stones.forEach((s, i) => {
+      if (s.active && dt > 0) {
+        s.vel.y -= GRAVITY * dt;
+        s.pos.addScaledVector(s.vel, dt);
+        if (s.pos.y <= s.floor && s.vel.y < 0) {
+          s.active = false;
+          s.pos.y = s.floor;
+          spawnRing(s.pos);
+          audio.play("thud");
+        }
+      }
+      if (s.active) {
+        d.position.copy(s.pos);
+        d.rotation.set(now * 6 + s.spin, s.spin, now * 4);
+        d.scale.setScalar(1);
+      } else {
+        d.scale.setScalar(0);
+        d.position.set(0, -10, 0);
+      }
+      d.updateMatrix();
+      refs.stone.current!.setMatrixAt(i, d.matrix);
+    });
+    refs.stone.current!.instanceMatrix.needsUpdate = true;
+
+    // impact rings
+    rings.forEach((r, i) => {
+      if (r.active && dt > 0) {
+        r.t += dt;
+        if (r.t > 0.6) r.active = false;
+      }
+      if (r.active) {
+        const k = r.t / 0.6;
+        d.position.copy(r.pos);
+        d.rotation.set(0, 0, 0);
+        d.scale.setScalar(0.3 + k * 1.6);
+      } else {
+        d.scale.setScalar(0);
+        d.position.set(0, -10, 0);
+      }
+      d.updateMatrix();
+      refs.ring.current!.setMatrixAt(i, d.matrix);
+    });
+    refs.ring.current!.instanceMatrix.needsUpdate = true;
+
     if (live) audio.setActivity(talkers / Math.max(1, members.length) * 3);
     if (bubblesChanged) setBubbles(bubbleRef.current);
   });
@@ -385,6 +563,9 @@ export function Audience({ config, running, audio, showRoles }: Props) {
       <instancedMesh ref={refs.head} args={[geo.head, undefined, n]} frustumCulled={false}>
         <meshStandardMaterial roughness={0.6} />
       </instancedMesh>
+      <instancedMesh ref={refs.hair} args={[geo.hair, undefined, n]} frustumCulled={false}>
+        <meshStandardMaterial roughness={0.85} />
+      </instancedMesh>
       <instancedMesh ref={refs.armL} args={[geo.arm, undefined, n]} frustumCulled={false}>
         <meshStandardMaterial roughness={0.7} />
       </instancedMesh>
@@ -399,6 +580,12 @@ export function Audience({ config, running, audio, showRoles }: Props) {
       </instancedMesh>
       <instancedMesh ref={refs.badge} args={[geo.badge, undefined, n]} frustumCulled={false}>
         <meshBasicMaterial toneMapped={false} />
+      </instancedMesh>
+      <instancedMesh ref={refs.stone} args={[geo.stone, undefined, MAX_STONES]} frustumCulled={false}>
+        <meshStandardMaterial color="#8b8b93" roughness={0.9} />
+      </instancedMesh>
+      <instancedMesh ref={refs.ring} args={[geo.ring, undefined, MAX_RINGS]} frustumCulled={false}>
+        <meshBasicMaterial color="#f5b942" transparent opacity={0.55} blending={THREE.AdditiveBlending} depthWrite={false} toneMapped={false} />
       </instancedMesh>
       {bubbles.map((b) => (
         <Html key={b.id} position={b.pos} center distanceFactor={9} zIndexRange={[20, 0]}>

@@ -122,10 +122,10 @@ export function Auditorium({ config, running, audio, showRoles, seed }: Props) {
     <Canvas
       dpr={[1, 1.75]}
       gl={{ antialias: true, powerPreference: "high-performance" }}
-      camera={{ position: [0, 2.8, -2.5], fov: 60, near: 0.1, far: 80 }}
+      camera={{ position: [0, 2.8, -2.5], fov: 60, near: 0.1, far: 120 }}
     >
       <color attach="background" args={["#0d0809"]} />
-      <fog attach="fog" args={["#0d0809", 10, 34]} />
+      <fog attach="fog" args={["#0d0809", 12, 46]} />
       <hemisphereLight args={["#ffd9b0", "#2a1010", 0.55]} />
       <ambientLight intensity={0.25} />
       {/* stage wash spilling onto the front rows */}
