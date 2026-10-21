@@ -21,8 +21,9 @@ interface Member {
   bubbleCd: number;
   scaleW: number;
   scaleH: number;
-  hair: 0 | 1 | 2; // cap, bun, none
+  hair: 0 | 1 | 2 | 3; // cap, bun, none, full
   threw: boolean;
+  blinkT: number;
 }
 
 interface Bubble {
@@ -135,8 +136,9 @@ export function Audience({ config, running, audio, showRoles }: Props) {
       bubbleCd: Math.random() * 5,
       scaleW: 0.9 + Math.random() * 0.25,
       scaleH: 0.92 + Math.random() * 0.16,
-      hair: (Math.random() < 0.45 ? 0 : Math.random() < 0.75 ? 1 : 2) as 0 | 1 | 2,
+      hair: (Math.random() < 0.4 ? 0 : Math.random() < 0.65 ? 1 : Math.random() < 0.7 ? 3 : 2) as 0 | 1 | 2 | 3,
       threw: false,
+      blinkT: 1 + Math.random() * 4,
     }));
   }, [config, rows]);
 
@@ -147,10 +149,16 @@ export function Audience({ config, running, audio, showRoles }: Props) {
     const arm = new THREE.CapsuleGeometry(0.05, 0.42, 3, 6).translate(0, -0.25, 0);
     const leg = new THREE.CapsuleGeometry(0.075, 0.42, 3, 6).translate(0, -0.25, 0);
     const badge = new THREE.OctahedronGeometry(0.08);
+    const eye = new THREE.SphereGeometry(0.03, 8, 6);
+    const pupil = new THREE.SphereGeometry(0.014, 6, 6);
+    const brow = new THREE.BoxGeometry(0.05, 0.014, 0.018);
+    const nose = new THREE.SphereGeometry(0.026, 8, 6);
+    const ear = new THREE.SphereGeometry(0.032, 6, 6).scale(0.55, 1, 0.8);
+    const mouth = new THREE.SphereGeometry(0.034, 10, 8).scale(1, 0.4, 0.5);
     const seat = new THREE.BoxGeometry(0.8, 1, 0.7);
     const stone = new THREE.DodecahedronGeometry(0.09);
     const ring = new THREE.RingGeometry(0.28, 0.38, 24).rotateX(-Math.PI / 2);
-    return { torso, head, hair, arm, leg, badge, seat, stone, ring };
+    return { torso, head, hair, arm, leg, badge, seat, stone, ring, eye, pupil, brow, nose, ear, mouth };
   }, []);
 
   const refs = {
@@ -162,6 +170,12 @@ export function Audience({ config, running, audio, showRoles }: Props) {
     legL: useRef<THREE.InstancedMesh>(null),
     legR: useRef<THREE.InstancedMesh>(null),
     badge: useRef<THREE.InstancedMesh>(null),
+    eye: useRef<THREE.InstancedMesh>(null),
+    pupil: useRef<THREE.InstancedMesh>(null),
+    brow: useRef<THREE.InstancedMesh>(null),
+    nose: useRef<THREE.InstancedMesh>(null),
+    ear: useRef<THREE.InstancedMesh>(null),
+    mouth: useRef<THREE.InstancedMesh>(null),
     seat: useRef<THREE.InstancedMesh>(null),
     stone: useRef<THREE.InstancedMesh>(null),
     ring: useRef<THREE.InstancedMesh>(null),
@@ -177,18 +191,38 @@ export function Audience({ config, running, audio, showRoles }: Props) {
     const legL = new THREE.Object3D();
     const legR = new THREE.Object3D();
     const badge = new THREE.Object3D();
+    const eyeL = new THREE.Object3D();
+    const eyeR = new THREE.Object3D();
+    const pupilL = new THREE.Object3D();
+    const pupilR = new THREE.Object3D();
+    const browL = new THREE.Object3D();
+    const browR = new THREE.Object3D();
+    const nose = new THREE.Object3D();
+    const earL = new THREE.Object3D();
+    const earR = new THREE.Object3D();
+    const mouth = new THREE.Object3D();
     root.add(torso, legL, legR);
     torso.add(head, armL, armR, badge);
-    head.add(hair);
+    head.add(hair, eyeL, eyeR, pupilL, pupilR, browL, browR, nose, earL, earR, mouth);
     torso.position.set(0, 0.85, 0);
     head.position.set(0, 0.47, 0);
     hair.position.set(0, 0.05, 0);
+    eyeL.position.set(-0.058, 0.03, 0.13);
+    eyeR.position.set(0.058, 0.03, 0.13);
+    pupilL.position.set(-0.058, 0.03, 0.152);
+    pupilR.position.set(0.058, 0.03, 0.152);
+    browL.position.set(-0.058, 0.078, 0.135);
+    browR.position.set(0.058, 0.078, 0.135);
+    nose.position.set(0, -0.005, 0.152);
+    earL.position.set(-0.15, 0.01, -0.01);
+    earR.position.set(0.15, 0.01, -0.01);
+    mouth.position.set(0, -0.062, 0.14);
     armL.position.set(-0.25, 0.25, 0);
     armR.position.set(0.25, 0.25, 0);
     legL.position.set(-0.1, 0.55, 0);
     legR.position.set(0.1, 0.55, 0);
     badge.position.set(0, 0.85, 0);
-    return { root, torso, head, hair, armL, armR, legL, legR, badge };
+    return { root, torso, head, hair, armL, armR, legL, legR, badge, eyeL, eyeR, pupilL, pupilR, browL, browR, nose, earL, earR, mouth };
   }, []);
 
   const stones = useMemo<Stone[]>(
@@ -206,7 +240,12 @@ export function Audience({ config, running, audio, showRoles }: Props) {
       refs.head.current!.setColorAt(i, skin);
       refs.armL.current!.setColorAt(i, skin);
       refs.armR.current!.setColorAt(i, skin);
+      refs.nose.current!.setColorAt(i, skin);
+      refs.ear.current!.setColorAt(i * 2, skin);
+      refs.ear.current!.setColorAt(i * 2 + 1, skin);
       refs.hair.current!.setColorAt(i, c.set(HAIR_COLORS[(i * 11) % HAIR_COLORS.length]!));
+      refs.brow.current!.setColorAt(i * 2, c);
+      refs.brow.current!.setColorAt(i * 2 + 1, c);
       refs.badge.current!.setColorAt(i, c.set(BADGE[m.kind]));
     });
     Object.values(refs).forEach((r) => r.current?.instanceColor && (r.current.instanceColor.needsUpdate = true));

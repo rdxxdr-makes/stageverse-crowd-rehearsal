@@ -1,14 +1,41 @@
-// Procedural crowd audio via Web Audio — no audio files needed.
+// Procedural crowd audio via Web Audio — reaction SFX + two auto-blended looping tunes.
 export type CrowdSound = "clap" | "cheer" | "boo" | "laugh" | "thud";
+
+/** How much of each looping tune to play for a given lover/hater split. */
+export function tuneMix(lovers: number, haters: number): { lover: number; hater: number } {
+  const total = lovers + haters;
+  if (total <= 0) return { lover: 0.5, hater: 0.5 };
+  return { lover: lovers / total, hater: haters / total };
+}
+
+// ---- looping tunes (single lookahead scheduler, notes never overlap) ----
+const HATER_BPM = 140;
+const HATER_STEP = 60 / HATER_BPM / 2; // eighth notes
+const HATER_STEPS = 16;
+const HATER_BASS_STEPS = new Set([0, 3, 6, 10, 12]);
+const HATER_STABS: Record<number, [number, number]> = { 4: [233.08, 246.94], 12: [277.18, 293.66] };
+
+const LOVER_BPM = 84;
+const LOVER_STEP = 60 / LOVER_BPM / 2;
+const LOVER_STEPS = 16;
+const LOVER_ARP = [523.25, 659.25, 783.99, 1046.5, 783.99]; // C major pentatonic sparkle
+const LOVER_CHORD = [261.63, 329.63, 392];
 
 export class CrowdAudio {
   private ctx: AudioContext | null = null;
   private master!: GainNode;
-  private murmur!: GainNode;
+  private loverBus!: GainNode;
+  private haterBus!: GainNode;
   private noise!: AudioBuffer;
   private last: Record<string, number> = {};
   private volume = 0.6;
   private muted = false;
+  private mix = tuneMix(0, 0);
+  private timer: ReturnType<typeof setInterval> | null = null;
+  private loverNext = 0;
+  private loverStep = 0;
+  private haterNext = 0;
+  private haterStep = 0;
 
   get ready() {
     return !!this.ctx;
@@ -28,36 +55,25 @@ export class CrowdAudio {
     const d = this.noise.getChannelData(0);
     for (let i = 0; i < len; i++) d[i] = Math.random() * 2 - 1;
 
-    // Babble murmur: two filtered noise bands with slow LFO modulation
-    this.murmur = ctx.createGain();
-    this.murmur.gain.value = 0.05;
-    this.murmur.connect(this.master);
-    [
-      [320, 0.23],
-      [650, 0.37],
-    ].forEach(([f = 400, lf = 0.3]) => {
-      const src = ctx.createBufferSource();
-      src.buffer = this.noise;
-      src.loop = true;
-      const bp = ctx.createBiquadFilter();
-      bp.type = "bandpass";
-      bp.frequency.value = f;
-      bp.Q.value = 1.2;
-      const g = ctx.createGain();
-      g.gain.value = 0.5;
-      const lfo = ctx.createOscillator();
-      lfo.frequency.value = lf;
-      const lg = ctx.createGain();
-      lg.gain.value = 0.3;
-      lfo.connect(lg).connect(g.gain);
-      src.connect(bp).connect(g).connect(this.murmur);
-      src.start();
-      lfo.start();
-    });
+    // one bus per tune; the mix crossfades between them
+    this.loverBus = ctx.createGain();
+    this.loverBus.connect(this.master);
+    this.haterBus = ctx.createGain();
+    this.haterBus.connect(this.master);
+    this.applyMix();
+    this.loverNext = this.haterNext = ctx.currentTime + 0.15;
+    this.timer = setInterval(() => this.schedule(), 120);
   }
 
   private applyGain() {
     if (this.master) this.master.gain.value = this.muted ? 0 : this.volume;
+  }
+  private applyMix() {
+    if (!this.ctx) return;
+    const t = this.ctx.currentTime;
+    const base = 0.9;
+    this.loverBus.gain.setTargetAtTime(this.mix.lover * base, t, 0.7);
+    this.haterBus.gain.setTargetAtTime(this.mix.hater * base, t, 0.7);
   }
   setVolume(v: number) {
     this.volume = v;
@@ -67,6 +83,11 @@ export class CrowdAudio {
     this.muted = m;
     this.applyGain();
   }
+  /** Blend the two looping tunes to the current crowd split. */
+  setMix(lovers: number, haters: number) {
+    this.mix = tuneMix(lovers, haters);
+    this.applyMix();
+  }
   suspend() {
     this.ctx?.suspend();
   }
@@ -74,15 +95,67 @@ export class CrowdAudio {
     this.ctx?.resume();
   }
   dispose() {
+    if (this.timer) clearInterval(this.timer);
+    this.timer = null;
     this.ctx?.close();
     this.ctx = null;
   }
-  setActivity(level: number) {
-    if (!this.ctx) return;
-    this.murmur.gain.setTargetAtTime(0.03 + level * 0.12, this.ctx.currentTime, 0.5);
+
+  private schedule() {
+    const ctx = this.ctx;
+    if (!ctx || ctx.state !== "running") return;
+    const now = ctx.currentTime;
+    if (this.loverNext < now) this.loverNext = now + 0.05;
+    if (this.haterNext < now) this.haterNext = now + 0.05;
+    const horizon = now + 0.4;
+    while (this.loverNext < horizon) {
+      this.loverNote(this.loverNext, this.loverStep);
+      this.loverNext += LOVER_STEP;
+      this.loverStep = (this.loverStep + 1) % LOVER_STEPS;
+    }
+    while (this.haterNext < horizon) {
+      this.haterNote(this.haterNext, this.haterStep);
+      this.haterNext += HATER_STEP;
+      this.haterStep = (this.haterStep + 1) % HATER_STEPS;
+    }
   }
 
-  private burst(freq: number, q: number, start: number, dur: number, gain: number) {
+  // soft uplifting tune: warm pad chord + gentle bass each bar, bright pentatonic arp
+  private loverNote(t: number, step: number) {
+    if (step === 0) {
+      this.tone(130.81, t, 1.6, "triangle", 0.09, 0.08, this.loverBus);
+      LOVER_CHORD.forEach((f, i) => this.tone(f, t + i * 0.02, 2.4, "sine", 0.026, 0.7, this.loverBus));
+    }
+    if (step % 2 === 0) {
+      const f = LOVER_ARP[(step / 2) % LOVER_ARP.length]!;
+      this.tone(f * (1 + (Math.random() - 0.5) * 0.004), t, 0.5, "triangle", 0.05, 0.03, this.loverBus);
+    }
+  }
+
+  // aggressive tune: pounding low pulse, dissonant stabs, hissing backbeat
+  private haterNote(t: number, step: number) {
+    if (HATER_BASS_STEPS.has(step)) this.tone(41.2, t, 0.22, "sawtooth", 0.35, 0.005, this.haterBus, 38);
+    const stab = HATER_STABS[step];
+    if (stab) stab.forEach((f) => this.tone(f, t, 0.16, "square", 0.09, 0.004, this.haterBus));
+    if (step % 4 === 2) this.burst(1800, 0.9, t, 0.07, 0.05, this.haterBus);
+  }
+
+  private tone(freq: number, start: number, dur: number, type: OscillatorType, peak: number, attack: number, dest?: AudioNode, glideTo?: number) {
+    const ctx = this.ctx!;
+    const osc = ctx.createOscillator();
+    osc.type = type;
+    osc.frequency.setValueAtTime(freq, start);
+    if (glideTo) osc.frequency.exponentialRampToValueAtTime(glideTo, start + dur);
+    const g = ctx.createGain();
+    g.gain.setValueAtTime(0, start);
+    g.gain.linearRampToValueAtTime(peak, start + attack);
+    g.gain.exponentialRampToValueAtTime(0.001, start + dur);
+    osc.connect(g).connect(dest ?? this.master);
+    osc.start(start);
+    osc.stop(start + dur + 0.05);
+  }
+
+  private burst(freq: number, q: number, start: number, dur: number, gain: number, dest?: AudioNode) {
     const ctx = this.ctx!;
     const src = ctx.createBufferSource();
     src.buffer = this.noise;
@@ -95,7 +168,7 @@ export class CrowdAudio {
     g.gain.setValueAtTime(0, start);
     g.gain.linearRampToValueAtTime(gain, start + 0.003);
     g.gain.exponentialRampToValueAtTime(0.001, start + dur);
-    src.connect(bp).connect(g).connect(this.master);
+    src.connect(bp).connect(g).connect(dest ?? this.master);
     src.start(start, Math.random());
     src.stop(start + dur + 0.05);
   }
