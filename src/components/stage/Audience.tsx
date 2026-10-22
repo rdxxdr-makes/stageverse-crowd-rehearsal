@@ -1,6 +1,6 @@
 import { useFrame } from "@react-three/fiber";
 import { Html } from "@react-three/drei";
-import { useLayoutEffect, useMemo, useRef, useState, type MutableRefObject } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState, type MutableRefObject } from "react";
 import * as THREE from "three";
 import { PHRASES, type AudienceConfig, type Kind } from "@/lib/audience";
 import type { CrowdAudio, CrowdSound } from "@/lib/crowd-audio";
@@ -243,6 +243,11 @@ export function Audience({ config, running, audio, showRoles }: Props) {
       refs.nose.current!.setColorAt(i, skin);
       refs.ear.current!.setColorAt(i * 2, skin);
       refs.ear.current!.setColorAt(i * 2 + 1, skin);
+      refs.eye.current!.setColorAt(i * 2, c.set("#f2ece1"));
+      refs.eye.current!.setColorAt(i * 2 + 1, c.set("#f2ece1"));
+      refs.pupil.current!.setColorAt(i * 2, c.set("#171008"));
+      refs.pupil.current!.setColorAt(i * 2 + 1, c.set("#171008"));
+      refs.mouth.current!.setColorAt(i, c.set("#6b2f28"));
       refs.hair.current!.setColorAt(i, c.set(HAIR_COLORS[(i * 11) % HAIR_COLORS.length]!));
       refs.brow.current!.setColorAt(i * 2, c);
       refs.brow.current!.setColorAt(i * 2 + 1, c);
@@ -268,6 +273,11 @@ export function Audience({ config, running, audio, showRoles }: Props) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [members, rows]);
 
+  // blend the looping tunes to the current crowd split
+  useEffect(() => {
+    audio.setMix(config.lovers, config.haters);
+  }, [audio, config.lovers, config.haters]);
+
   const [bubbles, setBubbles] = useState<Bubble[]>([]);
   const bubbleRef = useRef<Bubble[]>([]);
   const clock = useRef(0);
@@ -279,7 +289,6 @@ export function Audience({ config, running, audio, showRoles }: Props) {
     clock.current += dt;
     const now = clock.current;
     let walkers = 0;
-    let talkers = 0;
     for (const m of members) if (m.action === "walk") walkers++;
 
     let bubblesChanged = false;
@@ -289,6 +298,7 @@ export function Audience({ config, running, audio, showRoles }: Props) {
     }
 
     const { root, torso, head, hair, armL, armR, legL, legR, badge } = rig;
+    const { eyeL, eyeR, pupilL, pupilR, browL, browR, nose, earL, earR, mouth } = rig;
 
     const spawnRing = (p: THREE.Vector3) => {
       const r = rings.find((r) => !r.active);
@@ -368,7 +378,6 @@ export function Audience({ config, running, audio, showRoles }: Props) {
           bubblesChanged = true;
         }
       }
-      if (m.action === "talk") talkers++;
 
       const t = now + m.phase;
       let lift = 0;
@@ -527,6 +536,30 @@ export function Audience({ config, running, audio, showRoles }: Props) {
       legR.rotation.set(lRx, 0, 0);
       badge.rotation.set(0, t * 2, 0);
       badge.scale.setScalar(showRoles && m.kind !== "neutral" ? 1 : 0);
+      // facial expression: blinking, brow angles, mouth movement
+      m.blinkT -= dt;
+      if (m.blinkT < -0.12) m.blinkT = 2 + Math.random() * 4;
+      const blink = m.blinkT < 0 ? 0.12 : 1;
+      eyeL.scale.set(1, blink, 1);
+      eyeR.scale.set(1, blink, 1);
+      pupilL.scale.setScalar(blink);
+      pupilR.scale.setScalar(blink);
+      let bl = 0;
+      let br = 0;
+      if (m.action === "skeptic") {
+        bl = -0.45;
+        br = 0.25;
+      } else if (m.action === "boo" || m.action === "mock") {
+        bl = -0.35;
+        br = -0.35;
+      } else if (m.action === "cheer" || m.action === "jump") {
+        bl = 0.3;
+        br = -0.3;
+      }
+      browL.rotation.z = bl;
+      browR.rotation.z = br;
+      const vocal = ["talk", "clap", "laugh", "cheer", "boo", "mock", "jump"].includes(m.action);
+      mouth.scale.set(1, vocal ? 0.7 + Math.abs(Math.sin(t * 11)) * 0.9 : 1, 1);
       root.updateMatrixWorld(true);
       refs.torso.current!.setMatrixAt(i, torso.matrixWorld);
       refs.head.current!.setMatrixAt(i, head.matrixWorld);
@@ -536,8 +569,18 @@ export function Audience({ config, running, audio, showRoles }: Props) {
       refs.legL.current!.setMatrixAt(i, legL.matrixWorld);
       refs.legR.current!.setMatrixAt(i, legR.matrixWorld);
       refs.badge.current!.setMatrixAt(i, badge.matrixWorld);
+      refs.eye.current!.setMatrixAt(i * 2, eyeL.matrixWorld);
+      refs.eye.current!.setMatrixAt(i * 2 + 1, eyeR.matrixWorld);
+      refs.pupil.current!.setMatrixAt(i * 2, pupilL.matrixWorld);
+      refs.pupil.current!.setMatrixAt(i * 2 + 1, pupilR.matrixWorld);
+      refs.brow.current!.setMatrixAt(i * 2, browL.matrixWorld);
+      refs.brow.current!.setMatrixAt(i * 2 + 1, browR.matrixWorld);
+      refs.nose.current!.setMatrixAt(i, nose.matrixWorld);
+      refs.ear.current!.setMatrixAt(i * 2, earL.matrixWorld);
+      refs.ear.current!.setMatrixAt(i * 2 + 1, earR.matrixWorld);
+      refs.mouth.current!.setMatrixAt(i, mouth.matrixWorld);
     });
-    for (const k of ["torso", "head", "hair", "armL", "armR", "legL", "legR", "badge"] as const)
+    for (const k of ["torso", "head", "hair", "armL", "armR", "legL", "legR", "badge", "eye", "pupil", "brow", "nose", "ear", "mouth"] as const)
       refs[k].current!.instanceMatrix.needsUpdate = true;
 
     // stones in flight
@@ -586,7 +629,6 @@ export function Audience({ config, running, audio, showRoles }: Props) {
     });
     refs.ring.current!.instanceMatrix.needsUpdate = true;
 
-    if (live) audio.setActivity(talkers / Math.max(1, members.length) * 3);
     if (bubblesChanged) setBubbles(bubbleRef.current);
   });
 
@@ -604,6 +646,24 @@ export function Audience({ config, running, audio, showRoles }: Props) {
       </instancedMesh>
       <instancedMesh ref={refs.hair} args={[geo.hair, undefined, n]} frustumCulled={false}>
         <meshStandardMaterial roughness={0.85} />
+      </instancedMesh>
+      <instancedMesh ref={refs.eye} args={[geo.eye, undefined, n * 2]} frustumCulled={false}>
+        <meshStandardMaterial roughness={0.25} />
+      </instancedMesh>
+      <instancedMesh ref={refs.pupil} args={[geo.pupil, undefined, n * 2]} frustumCulled={false}>
+        <meshBasicMaterial toneMapped={false} />
+      </instancedMesh>
+      <instancedMesh ref={refs.brow} args={[geo.brow, undefined, n * 2]} frustumCulled={false}>
+        <meshStandardMaterial roughness={0.9} />
+      </instancedMesh>
+      <instancedMesh ref={refs.nose} args={[geo.nose, undefined, n]} frustumCulled={false}>
+        <meshStandardMaterial roughness={0.6} />
+      </instancedMesh>
+      <instancedMesh ref={refs.ear} args={[geo.ear, undefined, n * 2]} frustumCulled={false}>
+        <meshStandardMaterial roughness={0.6} />
+      </instancedMesh>
+      <instancedMesh ref={refs.mouth} args={[geo.mouth, undefined, n]} frustumCulled={false}>
+        <meshStandardMaterial roughness={0.7} />
       </instancedMesh>
       <instancedMesh ref={refs.armL} args={[geo.arm, undefined, n]} frustumCulled={false}>
         <meshStandardMaterial roughness={0.7} />
