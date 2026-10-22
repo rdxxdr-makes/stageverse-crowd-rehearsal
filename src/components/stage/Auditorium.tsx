@@ -106,6 +106,78 @@ function Hall({ rows }: { rows: number }) {
   );
 }
 
+/** Small helicopter that continuously flies across the hall above the crowd. */
+function Helicopter() {
+  const g = useRef<THREE.Group>(null);
+  const rotor = useRef<THREE.Group>(null);
+  const tail = useRef<THREE.Mesh>(null);
+  const beacon = useRef<THREE.Mesh>(null);
+  useFrame((_, raw) => {
+    const dt = Math.min(raw, 0.05);
+    const t = g.current;
+    if (!t) return;
+    t.position.x -= dt * 2.4;
+    if (t.position.x < -16) t.position.x = 16;
+    t.position.y = 8.5 + Math.sin(t.position.x * 0.45) * 0.22;
+    t.rotation.z = -0.04;
+    if (rotor.current) rotor.current.rotation.y += dt * 42;
+    if (tail.current) tail.current.rotation.x += dt * 60;
+    if (beacon.current) beacon.current.scale.setScalar(Math.sin(performance.now() * 0.006) > 0 ? 1 : 0.25);
+  });
+  return (
+    <group ref={g} position={[16, 8.5, 5]}>
+      {/* fuselage */}
+      <mesh scale={[1.6, 0.62, 0.66]}>
+        <sphereGeometry args={[0.5, 12, 10]} />
+        <meshStandardMaterial color="#23262b" roughness={0.45} metalness={0.3} />
+      </mesh>
+      {/* cockpit glass */}
+      <mesh position={[-0.55, 0.06, 0]} scale={[0.6, 0.45, 0.5]}>
+        <sphereGeometry args={[0.5, 10, 8]} />
+        <meshStandardMaterial color="#0e1a24" roughness={0.15} metalness={0.6} />
+      </mesh>
+      {/* tail boom, fin and tail rotor */}
+      <mesh position={[1.25, 0.1, 0]} rotation-z={-0.06}>
+        <boxGeometry args={[1.7, 0.1, 0.1]} />
+        <meshStandardMaterial color="#23262b" roughness={0.5} />
+      </mesh>
+      <mesh position={[2.05, 0.28, 0]}>
+        <boxGeometry args={[0.08, 0.45, 0.04]} />
+        <meshStandardMaterial color="#23262b" />
+      </mesh>
+      <mesh ref={tail} position={[2.12, 0.28, 0.03]}>
+        <boxGeometry args={[0.02, 0.5, 0.02]} />
+        <meshStandardMaterial color="#151515" />
+      </mesh>
+      {/* landing skids */}
+      {[-0.28, 0.28].map((z) => (
+        <mesh key={z} position={[0, -0.5, z]}>
+          <boxGeometry args={[1.3, 0.04, 0.05]} />
+          <meshStandardMaterial color="#151719" />
+        </mesh>
+      ))}
+      {/* rotor mast + spinning main rotor */}
+      <mesh position={[0, 0.42, 0]}>
+        <cylinderGeometry args={[0.03, 0.05, 0.18, 6]} />
+        <meshStandardMaterial color="#151719" />
+      </mesh>
+      <group ref={rotor} position={[0, 0.55, 0]}>
+        {[0, Math.PI / 2].map((r) => (
+          <mesh key={r} rotation-y={r}>
+            <boxGeometry args={[3.4, 0.015, 0.12]} />
+            <meshStandardMaterial color="#191b1e" roughness={0.6} />
+          </mesh>
+        ))}
+      </group>
+      {/* blinking beacon */}
+      <mesh ref={beacon} position={[2.1, 0.52, 0]}>
+        <sphereGeometry args={[0.05, 6, 6]} />
+        <meshBasicMaterial color="#ff3b30" toneMapped={false} />
+      </mesh>
+    </group>
+  );
+}
+
 interface Props {
   config: AudienceConfig;
   running: MutableRefObject<boolean>;
@@ -119,9 +191,10 @@ export function Auditorium({ config, running, audio, showRoles, seed }: Props) {
   const midZ = seatPosition(Math.floor(rows / 2), 0).z;
   const houseLights = [...Array(Math.ceil(rows / 2)).keys()];
   return (
-    <Canvas
-      dpr={[1, 1.75]}
-      gl={{ antialias: true, powerPreference: "high-performance" }}
+    <div data-stage-canvas className="fixed inset-0">
+      <Canvas
+        dpr={[1, 1.75]}
+        gl={{ antialias: true, powerPreference: "high-performance", preserveDrawingBuffer: true }}
       camera={{ position: [0, 2.8, -2.5], fov: 60, near: 0.1, far: 120 }}
     >
       <color attach="background" args={["#0d0809"]} />
@@ -140,6 +213,7 @@ export function Auditorium({ config, running, audio, showRoles, seed }: Props) {
         <Lightformer intensity={0.5} color="#8bb" position={[-5, 1, -1]} rotation-y={Math.PI / 2} scale={[20, 1, 1]} />
       </Environment>
       <Hall rows={rows} />
+      <Helicopter />
       <Audience key={seed} config={config} running={running} audio={audio} showRoles={showRoles} />
       <OrbitControls
         target={[0, 1.6, midZ]}
@@ -152,6 +226,7 @@ export function Auditorium({ config, running, audio, showRoles, seed }: Props) {
         maxAzimuthAngle={Math.PI + 0.9}
         enableDamping
       />
-    </Canvas>
+      </Canvas>
+    </div>
   );
 }
