@@ -378,7 +378,6 @@ export function Audience({ config, running, audio, showRoles }: Props) {
           bubblesChanged = true;
         }
       }
-      if (m.action === "talk") talkers++;
 
       const t = now + m.phase;
       let lift = 0;
