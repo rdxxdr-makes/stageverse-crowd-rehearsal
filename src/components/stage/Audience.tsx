@@ -273,6 +273,11 @@ export function Audience({ config, running, audio, showRoles }: Props) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [members, rows]);
 
+  // blend the looping tunes to the current crowd split
+  useEffect(() => {
+    audio.setMix(config.lovers, config.haters);
+  }, [audio, config.lovers, config.haters]);
+
   const [bubbles, setBubbles] = useState<Bubble[]>([]);
   const bubbleRef = useRef<Bubble[]>([]);
   const clock = useRef(0);
@@ -284,7 +289,6 @@ export function Audience({ config, running, audio, showRoles }: Props) {
     clock.current += dt;
     const now = clock.current;
     let walkers = 0;
-    let talkers = 0;
     for (const m of members) if (m.action === "walk") walkers++;
 
     let bubblesChanged = false;
