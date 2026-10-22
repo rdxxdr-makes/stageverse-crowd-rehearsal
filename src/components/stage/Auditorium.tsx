@@ -1,4 +1,4 @@
-import { Canvas, type ThreeElements } from "@react-three/fiber";
+import { Canvas, useFrame, type ThreeElements } from "@react-three/fiber";
 import { Environment, Lightformer, OrbitControls } from "@react-three/drei";
 import { useEffect, useMemo, useRef, type MutableRefObject } from "react";
 import * as THREE from "three";
