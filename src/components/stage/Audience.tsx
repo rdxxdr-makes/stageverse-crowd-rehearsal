@@ -1,6 +1,6 @@
 import { useFrame } from "@react-three/fiber";
 import { Html } from "@react-three/drei";
-import { useLayoutEffect, useMemo, useRef, useState, type MutableRefObject } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState, type MutableRefObject } from "react";
 import * as THREE from "three";
 import { PHRASES, type AudienceConfig, type Kind } from "@/lib/audience";
 import type { CrowdAudio, CrowdSound } from "@/lib/crowd-audio";
@@ -626,7 +626,6 @@ export function Audience({ config, running, audio, showRoles }: Props) {
     });
     refs.ring.current!.instanceMatrix.needsUpdate = true;
 
-    if (live) audio.setActivity(talkers / Math.max(1, members.length) * 3);
     if (bubblesChanged) setBubbles(bubbleRef.current);
   });
 
