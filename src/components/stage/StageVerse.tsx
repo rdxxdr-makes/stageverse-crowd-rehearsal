@@ -3,7 +3,7 @@ import { Pause, Play, RotateCcw, Volume2, VolumeX, SlidersHorizontal, X, Video, 
 import { Auditorium } from "./Auditorium";
 import { INTENSITY_LABELS, MAX_AUDIENCE, MAX_HATER_INTENSITY, MIN_AUDIENCE, validateConfig, type AudienceConfig } from "@/lib/audience";
 import { CrowdAudio } from "@/lib/crowd-audio";
-import { PracticeRecorder, type RecState } from "@/lib/recorder";
+import { PracticeRecorder, StageComposer, type RecState } from "@/lib/recorder";
 
 type Status = "idle" | "running" | "paused";
 
@@ -30,13 +30,16 @@ function NumField({ label, value, onChange, max, min = 0, disabled, tone }: {
   );
 }
 
-function PracticePanel({ onClose }: { onClose: () => void }) {
+function PracticePanel({ audio, onClose }: { audio: CrowdAudio; onClose: () => void }) {
   const rec = useRef<PracticeRecorder | null>(null);
   if (!rec.current) rec.current = new PracticeRecorder();
+  const composer = useRef<StageComposer | null>(null);
+  if (!composer.current) composer.current = new StageComposer();
   const [state, setState] = useState<RecState>("idle");
   const [error, setError] = useState<string | null>(null);
   const [videoUrl, setVideoUrl] = useState<string | null>(null);
   const [elapsed, setElapsed] = useState(0);
+  const [composite, setComposite] = useState(false); // true = stage + webcam + crowd audio
   const liveRef = useRef<HTMLVideoElement>(null);
   const supported = PracticeRecorder.supported();
 
