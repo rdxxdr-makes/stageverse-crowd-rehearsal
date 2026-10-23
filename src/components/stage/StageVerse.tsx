@@ -153,14 +153,16 @@ function PracticePanel({ audio, onClose }: { audio: CrowdAudio; onClose: () => v
           {state === "recorded" && (
             <div className="flex gap-2">
               <button className="sv-btn flex-1" onClick={retake}><RefreshCcw size={16} /> Retake</button>
-              <a className="sv-btn sv-btn-primary flex-1" href={videoUrl ?? undefined} download={`stageverse-practice.${rec.current!.fileExt}`}>
+              <a className="sv-btn sv-btn-primary flex-1" href={videoUrl ?? undefined} download={`stageverse-practice.${(composite ? composer.current! : rec.current!).fileExt}`}>
                 <Download size={16} /> Download
               </a>
             </div>
           )}
           {error && <p className="sv-error" role="alert">{error}</p>}
           {state === "idle" && !error && (
-            <p className="text-xs text-muted-foreground">Record yourself performing with webcam video and microphone audio, then review or download the take. Nothing leaves your device.</p>
+            <p className="text-xs text-muted-foreground">
+              Record the live 3D stage together with your webcam (picture-in-picture), microphone and crowd audio. Falls back to webcam-only if stage capture isn't supported. Nothing leaves your device.
+            </p>
           )}
         </div>
       )}
@@ -260,7 +262,7 @@ export function StageVerse() {
         </div>
       </div>
 
-      {practiceOpen && <PracticePanel onClose={() => setPracticeOpen(false)} />}
+      {practiceOpen && <PracticePanel audio={audio.current} onClose={() => setPracticeOpen(false)} />}
 
       {panelOpen && (
         <div className="sv-panel absolute bottom-24 left-3 right-3 sm:bottom-auto sm:left-5 sm:right-auto sm:top-24 sm:w-80">
