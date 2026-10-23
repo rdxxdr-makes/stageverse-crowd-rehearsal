@@ -3,7 +3,7 @@ import { Pause, Play, RotateCcw, Volume2, VolumeX, SlidersHorizontal, X, Video, 
 import { Auditorium } from "./Auditorium";
 import { INTENSITY_LABELS, MAX_AUDIENCE, MAX_HATER_INTENSITY, MIN_AUDIENCE, validateConfig, type AudienceConfig } from "@/lib/audience";
 import { CrowdAudio } from "@/lib/crowd-audio";
-import { PracticeRecorder, type RecState } from "@/lib/recorder";
+import { PracticeRecorder, StageComposer, type RecState } from "@/lib/recorder";
 
 type Status = "idle" | "running" | "paused";
 
@@ -30,13 +30,16 @@ function NumField({ label, value, onChange, max, min = 0, disabled, tone }: {
   );
 }
 
-function PracticePanel({ onClose }: { onClose: () => void }) {
+function PracticePanel({ audio, onClose }: { audio: CrowdAudio; onClose: () => void }) {
   const rec = useRef<PracticeRecorder | null>(null);
   if (!rec.current) rec.current = new PracticeRecorder();
+  const composer = useRef<StageComposer | null>(null);
+  if (!composer.current) composer.current = new StageComposer();
   const [state, setState] = useState<RecState>("idle");
   const [error, setError] = useState<string | null>(null);
   const [videoUrl, setVideoUrl] = useState<string | null>(null);
   const [elapsed, setElapsed] = useState(0);
+  const [composite, setComposite] = useState(false); // true = stage + webcam + crowd audio
   const liveRef = useRef<HTMLVideoElement>(null);
   const supported = PracticeRecorder.supported();
 
@@ -50,6 +53,7 @@ function PracticePanel({ onClose }: { onClose: () => void }) {
   useEffect(() => () => {
     rec.current?.stopCamera();
     rec.current?.discard();
+    composer.current?.discard();
   }, []);
 
   const enableCamera = async () => {
@@ -69,7 +73,15 @@ function PracticePanel({ onClose }: { onClose: () => void }) {
   const startRec = () => {
     setError(null);
     try {
-      rec.current!.start();
+      // Prefer the composite: live 3D stage + webcam picture-in-picture + mic + crowd audio.
+      const stage = StageComposer.findStageCanvas();
+      const crowd = audio.getRecordingStream();
+      if (composer.current!.start(stage, rec.current!.stream!, crowd)) {
+        setComposite(true);
+      } else {
+        rec.current!.start();
+        setComposite(false);
+      }
       setElapsed(0);
       setState("recording");
     } catch {
@@ -78,15 +90,17 @@ function PracticePanel({ onClose }: { onClose: () => void }) {
   };
 
   const stopRec = async () => {
-    const url = await rec.current!.stop();
+    const url = composite ? await composer.current!.stop() : await rec.current!.stop();
     if (liveRef.current) liveRef.current.srcObject = null;
     setVideoUrl(url);
     setState("recorded");
   };
 
   const retake = () => {
+    composer.current!.discard();
     rec.current!.discard();
     setVideoUrl(null);
+    setComposite(false);
     if (liveRef.current && rec.current!.stream) {
       liveRef.current.srcObject = rec.current!.stream;
       liveRef.current.play().catch(() => {});
@@ -97,6 +111,7 @@ function PracticePanel({ onClose }: { onClose: () => void }) {
   const close = () => {
     rec.current!.stopCamera();
     rec.current!.discard();
+    composer.current!.discard();
     onClose();
   };
 
@@ -138,14 +153,16 @@ function PracticePanel({ onClose }: { onClose: () => void }) {
           {state === "recorded" && (
             <div className="flex gap-2">
               <button className="sv-btn flex-1" onClick={retake}><RefreshCcw size={16} /> Retake</button>
-              <a className="sv-btn sv-btn-primary flex-1" href={videoUrl ?? undefined} download={`stageverse-practice.${rec.current!.fileExt}`}>
+              <a className="sv-btn sv-btn-primary flex-1" href={videoUrl ?? undefined} download={`stageverse-practice.${(composite ? composer.current! : rec.current!).fileExt}`}>
                 <Download size={16} /> Download
               </a>
             </div>
           )}
           {error && <p className="sv-error" role="alert">{error}</p>}
           {state === "idle" && !error && (
-            <p className="text-xs text-muted-foreground">Record yourself performing with webcam video and microphone audio, then review or download the take. Nothing leaves your device.</p>
+            <p className="text-xs text-muted-foreground">
+              Record the live 3D stage together with your webcam (picture-in-picture), microphone and crowd audio. Falls back to webcam-only if stage capture isn't supported. Nothing leaves your device.
+            </p>
           )}
         </div>
       )}
@@ -245,7 +262,7 @@ export function StageVerse() {
         </div>
       </div>
 
-      {practiceOpen && <PracticePanel onClose={() => setPracticeOpen(false)} />}
+      {practiceOpen && <PracticePanel audio={audio.current} onClose={() => setPracticeOpen(false)} />}
 
       {panelOpen && (
         <div className="sv-panel absolute bottom-24 left-3 right-3 sm:bottom-auto sm:left-5 sm:right-auto sm:top-24 sm:w-80">
