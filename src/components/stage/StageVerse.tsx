@@ -53,6 +53,7 @@ function PracticePanel({ audio, onClose }: { audio: CrowdAudio; onClose: () => v
   useEffect(() => () => {
     rec.current?.stopCamera();
     rec.current?.discard();
+    composer.current?.discard();
   }, []);
 
   const enableCamera = async () => {
@@ -72,7 +73,15 @@ function PracticePanel({ audio, onClose }: { audio: CrowdAudio; onClose: () => v
   const startRec = () => {
     setError(null);
     try {
-      rec.current!.start();
+      // Prefer the composite: live 3D stage + webcam picture-in-picture + mic + crowd audio.
+      const stage = StageComposer.findStageCanvas();
+      const crowd = audio.getRecordingStream();
+      if (composer.current!.start(stage, rec.current!.stream!, crowd)) {
+        setComposite(true);
+      } else {
+        rec.current!.start();
+        setComposite(false);
+      }
       setElapsed(0);
       setState("recording");
     } catch {
@@ -81,15 +90,17 @@ function PracticePanel({ audio, onClose }: { audio: CrowdAudio; onClose: () => v
   };
 
   const stopRec = async () => {
-    const url = await rec.current!.stop();
+    const url = composite ? await composer.current!.stop() : await rec.current!.stop();
     if (liveRef.current) liveRef.current.srcObject = null;
     setVideoUrl(url);
     setState("recorded");
   };
 
   const retake = () => {
+    composer.current!.discard();
     rec.current!.discard();
     setVideoUrl(null);
+    setComposite(false);
     if (liveRef.current && rec.current!.stream) {
       liveRef.current.srcObject = rec.current!.stream;
       liveRef.current.play().catch(() => {});
@@ -100,6 +111,7 @@ function PracticePanel({ audio, onClose }: { audio: CrowdAudio; onClose: () => v
   const close = () => {
     rec.current!.stopCamera();
     rec.current!.discard();
+    composer.current!.discard();
     onClose();
   };
 
