@@ -1,9 +1,9 @@
 import { useEffect, useRef, useState } from "react";
-import { Pause, Play, RotateCcw, Volume2, VolumeX, SlidersHorizontal, X, Video, Square, Download, RefreshCcw } from "lucide-react";
+import { Pause, Play, RotateCcw, Volume2, VolumeX, SlidersHorizontal, X, Video, Square, Download, RefreshCcw, UserRound } from "lucide-react";
 import { Auditorium } from "./Auditorium";
 import { INTENSITY_LABELS, MAX_AUDIENCE, MAX_HATER_INTENSITY, MIN_AUDIENCE, validateConfig, type AudienceConfig } from "@/lib/audience";
 import { CrowdAudio } from "@/lib/crowd-audio";
-import { PracticeRecorder, StageComposer, type RecState } from "@/lib/recorder";
+import { PracticeRecorder, type RecState } from "@/lib/recorder";
 
 type Status = "idle" | "running" | "paused";
 
@@ -30,16 +30,13 @@ function NumField({ label, value, onChange, max, min = 0, disabled, tone }: {
   );
 }
 
-function PracticePanel({ audio, onClose }: { audio: CrowdAudio; onClose: () => void }) {
+function PracticePanel({ onClose }: { onClose: () => void }) {
   const rec = useRef<PracticeRecorder | null>(null);
   if (!rec.current) rec.current = new PracticeRecorder();
-  const composer = useRef<StageComposer | null>(null);
-  if (!composer.current) composer.current = new StageComposer();
   const [state, setState] = useState<RecState>("idle");
   const [error, setError] = useState<string | null>(null);
   const [videoUrl, setVideoUrl] = useState<string | null>(null);
   const [elapsed, setElapsed] = useState(0);
-  const [composite, setComposite] = useState(false); // true = stage + webcam + crowd audio
   const liveRef = useRef<HTMLVideoElement>(null);
   const supported = PracticeRecorder.supported();
 
@@ -53,7 +50,6 @@ function PracticePanel({ audio, onClose }: { audio: CrowdAudio; onClose: () => v
   useEffect(() => () => {
     rec.current?.stopCamera();
     rec.current?.discard();
-    composer.current?.discard();
   }, []);
 
   const enableCamera = async () => {
@@ -73,15 +69,8 @@ function PracticePanel({ audio, onClose }: { audio: CrowdAudio; onClose: () => v
   const startRec = () => {
     setError(null);
     try {
-      // Prefer the composite: live 3D stage + webcam picture-in-picture + mic + crowd audio.
-      const stage = StageComposer.findStageCanvas();
-      const crowd = audio.getRecordingStream();
-      if (composer.current!.start(stage, rec.current!.stream!, crowd)) {
-        setComposite(true);
-      } else {
-        rec.current!.start();
-        setComposite(false);
-      }
+      // Records only the user's webcam and microphone, at full quality.
+      rec.current!.start();
       setElapsed(0);
       setState("recording");
     } catch {
@@ -90,17 +79,15 @@ function PracticePanel({ audio, onClose }: { audio: CrowdAudio; onClose: () => v
   };
 
   const stopRec = async () => {
-    const url = composite ? await composer.current!.stop() : await rec.current!.stop();
+    const url = await rec.current!.stop();
     if (liveRef.current) liveRef.current.srcObject = null;
     setVideoUrl(url);
     setState("recorded");
   };
 
   const retake = () => {
-    composer.current!.discard();
     rec.current!.discard();
     setVideoUrl(null);
-    setComposite(false);
     if (liveRef.current && rec.current!.stream) {
       liveRef.current.srcObject = rec.current!.stream;
       liveRef.current.play().catch(() => {});
@@ -111,7 +98,6 @@ function PracticePanel({ audio, onClose }: { audio: CrowdAudio; onClose: () => v
   const close = () => {
     rec.current!.stopCamera();
     rec.current!.discard();
-    composer.current!.discard();
     onClose();
   };
 
@@ -153,7 +139,7 @@ function PracticePanel({ audio, onClose }: { audio: CrowdAudio; onClose: () => v
           {state === "recorded" && (
             <div className="flex gap-2">
               <button className="sv-btn flex-1" onClick={retake}><RefreshCcw size={16} /> Retake</button>
-              <a className="sv-btn sv-btn-primary flex-1" href={videoUrl ?? undefined} download={`stageverse-practice.${(composite ? composer.current! : rec.current!).fileExt}`}>
+              <a className="sv-btn sv-btn-primary flex-1" href={videoUrl ?? undefined} download={`stageverse-practice.${rec.current!.fileExt}`}>
                 <Download size={16} /> Download
               </a>
             </div>
@@ -161,7 +147,7 @@ function PracticePanel({ audio, onClose }: { audio: CrowdAudio; onClose: () => v
           {error && <p className="sv-error" role="alert">{error}</p>}
           {state === "idle" && !error && (
             <p className="text-xs text-muted-foreground">
-              Record the live 3D stage together with your webcam (picture-in-picture), microphone and crowd audio. Falls back to webcam-only if stage capture isn't supported. Nothing leaves your device.
+              Record your webcam and microphone at full quality. Nothing leaves your device.
             </p>
           )}
         </div>
@@ -181,6 +167,9 @@ export function StageVerse() {
   const [showRoles, setShowRoles] = useState(true);
   const [panelOpen, setPanelOpen] = useState(true);
   const [practiceOpen, setPracticeOpen] = useState(false);
+  const [guestOpen, setGuestOpen] = useState(false);
+  const [guestName, setGuestName] = useState("");
+  const guest = useRef<{ name: string } | null>(null);
   const running = useRef(false);
   const audio = useRef<CrowdAudio | null>(null);
   if (!audio.current) audio.current = new CrowdAudio();
@@ -218,6 +207,14 @@ export function StageVerse() {
     setPanelOpen(true);
   };
 
+  const sendGuest = () => {
+    const name = guestName.trim();
+    if (!name || status === "idle") return;
+    guest.current = { name };
+    setGuestOpen(false);
+    setGuestName("");
+  };
+
   // live preview of the seated crowd while configuring
   useEffect(() => {
     if (status === "idle" && v.ok) setConfig(draft);
@@ -237,7 +234,7 @@ export function StageVerse() {
   return (
     <div className="fixed inset-0 overflow-hidden bg-background text-foreground">
       {supported && (
-        <Auditorium config={config} running={running} audio={audio.current} showRoles={showRoles} seed={seed} />
+        <Auditorium config={config} running={running} audio={audio.current} showRoles={showRoles} seed={seed} guest={guest} />
       )}
 
       <div className="pointer-events-none absolute inset-x-0 top-0 flex items-start justify-between p-3 sm:p-5">
@@ -262,7 +259,7 @@ export function StageVerse() {
         </div>
       </div>
 
-      {practiceOpen && <PracticePanel audio={audio.current} onClose={() => setPracticeOpen(false)} />}
+      {practiceOpen && <PracticePanel onClose={() => setPracticeOpen(false)} />}
 
       {panelOpen && (
         <div className="sv-panel absolute bottom-24 left-3 right-3 sm:bottom-auto sm:left-5 sm:right-auto sm:top-24 sm:w-80">
@@ -299,7 +296,7 @@ export function StageVerse() {
         </div>
       )}
 
-      <div className="absolute inset-x-0 bottom-0 flex justify-center gap-3 p-4 sm:p-6">
+      <div className="absolute inset-x-0 bottom-0 flex flex-wrap justify-center gap-3 p-4 sm:p-6">
         {status === "running" ? (
           <button className="sv-btn" onClick={pause}><Pause size={18} /> Pause</button>
         ) : (
@@ -307,8 +304,27 @@ export function StageVerse() {
             <Play size={18} /> {status === "paused" ? "Resume" : "Start"}
           </button>
         )}
+        <button className="sv-btn" onClick={() => setGuestOpen((o) => !o)} disabled={status === "idle"} title="Bring a guest on stage">
+          <UserRound size={18} /> Bring Someone on Stage
+        </button>
         <button className="sv-btn" onClick={reset} disabled={status === "idle"}><RotateCcw size={18} /> Reset</button>
       </div>
+
+      {guestOpen && status !== "idle" && (
+        <div className="sv-panel absolute bottom-24 left-3 right-3 sm:bottom-28 sm:left-auto sm:right-5 sm:w-80">
+          <div className="flex items-center justify-between">
+            <h2 className="font-display text-xl">Bring Someone on Stage</h2>
+            <button className="sv-icon" onClick={() => setGuestOpen(false)} aria-label="Close guest panel"><X size={16} /></button>
+          </div>
+          <p className="mt-2 text-xs text-muted-foreground">One audience member walks to the stage, is announced by name, greets you, then returns to their seat.</p>
+          <div className="mt-3 flex gap-2">
+            <input className="sv-num w-full" placeholder="Character name (e.g. RDX)" maxLength={24} value={guestName}
+              onChange={(e) => setGuestName(e.target.value)}
+              onKeyDown={(e) => { if (e.key === "Enter") sendGuest(); }} aria-label="Guest name" />
+            <button className="sv-btn sv-btn-primary" onClick={sendGuest} disabled={!guestName.trim()}>Go</button>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
