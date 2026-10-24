@@ -3,9 +3,10 @@ import { Html } from "@react-three/drei";
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type MutableRefObject } from "react";
 import * as THREE from "three";
 import { PHRASES, type AudienceConfig, type Kind } from "@/lib/audience";
+import { HeadMimic } from "@/lib/mimic";
 import type { CrowdAudio, CrowdSound } from "@/lib/crowd-audio";
 
-type Action = "watch" | "clap" | "cheer" | "jump" | "talk" | "laugh" | "skeptic" | "boo" | "mock" | "throw" | "walk";
+type Action = "watch" | "clap" | "cheer" | "jump" | "talk" | "laugh" | "skeptic" | "boo" | "mock" | "throw" | "walk" | "greet";
 
 interface Member {
   kind: Kind;
@@ -23,6 +24,7 @@ interface Member {
   scaleH: number;
   hair: 0 | 1 | 2 | 3; // cap, bun, none, full
   threw: boolean;
+  guestName?: string;
   blinkT: number;
 }
 
@@ -101,11 +103,14 @@ interface Props {
   running: MutableRefObject<boolean>;
   audio: CrowdAudio;
   showRoles: boolean;
+  guest: MutableRefObject<{ name: string } | null>;
 }
 
-export function Audience({ config, running, audio, showRoles }: Props) {
+export function Audience({ config, running, audio, showRoles, guest }: Props) {
   const rows = Math.ceil(config.size / COLS);
   const hw = useMemo(() => haterWeights(config.intensity), [config.intensity]);
+  const mimic = useRef<HeadMimic | null>(null);
+  if (!mimic.current) mimic.current = new HeadMimic();
 
   const members = useMemo<Member[]>(() => {
     const seats: THREE.Vector3[] = [];
@@ -290,6 +295,23 @@ export function Audience({ config, running, audio, showRoles }: Props) {
     const now = clock.current;
     let walkers = 0;
     for (const m of members) if (m.action === "walk") walkers++;
+
+    // guest entrance requested from the UI: the front-row centre member walks to the stage
+    if (guest.current && !members.some((m) => m.guestName)) {
+      const g = members[0]!;
+      g.guestName = guest.current.name;
+      g.action = "walk";
+      g.t = 0;
+      g.threw = false;
+      g.path = [
+        new THREE.Vector3(g.seat.x, g.seat.y, g.seat.z - 0.45),
+        new THREE.Vector3(0, 0, FRONT_Z - 1.2),
+        new THREE.Vector3(0, 0, 0.9),
+      ];
+      guest.current = null;
+      mimic.current!.start().catch(() => {});
+      audio.play("cheer");
+    }
 
     let bubblesChanged = false;
     if (bubbleRef.current.some((b) => b.until < now)) {
