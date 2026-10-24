@@ -184,9 +184,10 @@ interface Props {
   audio: CrowdAudio;
   showRoles: boolean;
   seed: number;
+  guest: MutableRefObject<{ name: string } | null>;
 }
 
-export function Auditorium({ config, running, audio, showRoles, seed }: Props) {
+export function Auditorium({ config, running, audio, showRoles, seed, guest }: Props) {
   const rows = Math.ceil(config.size / COLS);
   const midZ = seatPosition(Math.floor(rows / 2), 0).z;
   const houseLights = [...Array(Math.ceil(rows / 2)).keys()];
@@ -214,7 +215,7 @@ export function Auditorium({ config, running, audio, showRoles, seed }: Props) {
       </Environment>
       <Hall rows={rows} />
       <Helicopter />
-      <Audience key={seed} config={config} running={running} audio={audio} showRoles={showRoles} />
+      <Audience key={seed} config={config} running={running} audio={audio} showRoles={showRoles} guest={guest} />
       <OrbitControls
         target={[0, 1.6, midZ]}
         enablePan={false}
